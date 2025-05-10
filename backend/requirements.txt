@@ -1,0 +1,16 @@
+fastapi~=0.115.12
+uvicorn[standard]
+asyncpg
+openpyxl
+tf-keras
+psycopg2-binary
+python-multipart
+SQLAlchemy~=2.0.40
+requests~=2.32.3
+bcrypt~=4.3.0
+pandas~=2.2.3
+starlette~=0.46.2
+pydantic~=2.11.4
+opencv-python~=4.11.0.86
+deepface~=0.0.93
+alembic~=1.15.2
