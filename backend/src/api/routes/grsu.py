@@ -30,8 +30,14 @@ async def get_teacher_schedule(
     if not user_id:
         raise HTTPException(status_code=401, detail="Требуется авторизация")
 
+    try:
+        schedule_date_start = datetime.strptime(dateStart, "%d.%m.%Y").date().strftime("%d.%m.%Y")
+        schedule_date_end = datetime.strptime(dateEnd, "%d.%m.%Y").date().strftime("%d.%m.%Y")
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Неверный формат даты. Используйте ДД.MM.ГГГГ.")
+
     schedule = requests.get(
-        f'http://api.grsu.by/1.x/app2/getTeacherSchedule?teacherId={user.schedule_id}&dateStart={dateStart}&dateEnd={dateEnd}'
+        f'http://api.grsu.by/1.x/app2/getTeacherSchedule?teacherId={user.schedule_id}&dateStart={schedule_date_start}&dateEnd={schedule_date_end}'
     )
 
     return schedule.json()
@@ -39,7 +45,6 @@ async def get_teacher_schedule(
 
 @router.get('/getGroups')
 async def get_teacher_schedule(
-        db: SessionDep,
         request: Request,
         departmentId: int,
         facultyId: int,
@@ -50,7 +55,7 @@ async def get_teacher_schedule(
         raise HTTPException(status_code=401, detail="Требуется авторизация")
 
     groups = requests.get(
-        f'http://api.grsu.by/1.x/app2/getGroups?departmentId={departmentId}&facultyId={facultyId}&course={course}&lang=en_GB'
+        f'http://api.grsu.by/1.x/app2/getGroups?departmentId={departmentId}&facultyId={facultyId}&course={course}'
     )
 
     return groups.json()
@@ -66,6 +71,6 @@ def get_student_by_id(
         raise HTTPException(status_code=401, detail="Требуется авторизация")
 
     student = requests.get(
-        f'http://api.grsu.by/1.x/app2/getStudent?login={student_id}&lang=en_GB'
+        f'http://api.grsu.by/1.x/app2/getStudent?login={student_id}'
     )
     return student.json()

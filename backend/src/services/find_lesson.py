@@ -1,4 +1,6 @@
 from datetime import datetime
+
+import sqlalchemy
 from fastapi import HTTPException
 from sqlalchemy.future import select
 from src.models.grsu import Lesson, Faculty, Department, Group, LessonGroup
@@ -8,11 +10,12 @@ from src.models.user import User
 from src.utils.database.session import SessionDep
 
 
-async def find_lesson_in_grsu(lesson_id: int, teacher_id: str, group_id: int, db: SessionDep):
-    # в конечной версии строку раскомментировать
-    # date = datetime.now().strftime('%d.%m.%Y')
+async def find_lesson_in_grsu(lesson_id: int, teacher_id: str, group_id: int, date: str, db: SessionDep):
+    try:
+        lesson_date = datetime.strptime(date, "%d.%m.%Y").date().strftime("%d.%m.%Y")
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Неверный формат даты. Используйте ДД.MM.ГГГГ.")
 
-    date = '29.01.2025' # постить отчет к паре можно только в случае, если пара в этот день, для теста можно менять дату
     teacher = (
         await db.execute(
             select(User).where(User.id == teacher_id)
@@ -23,7 +26,7 @@ async def find_lesson_in_grsu(lesson_id: int, teacher_id: str, group_id: int, db
         raise HTTPException(status_code=404, detail="Преподаватель не найден")
 
     response = requests.get(
-        f'http://api.grsu.by/1.x/app2/getTeacherSchedule?teacherId={teacher.schedule_id}&dateStart={date}&dateEnd={date}&lang=en_GB'
+        f'http://api.grsu.by/1.x/app2/getTeacherSchedule?teacherId={teacher.schedule_id}&dateStart={lesson_date}&dateEnd={lesson_date}'
     )
 
     if response.json()['count'] == 0:
@@ -87,9 +90,14 @@ async def find_lesson_in_grsu(lesson_id: int, teacher_id: str, group_id: int, db
             await db.commit()
 
 
-    lesson_group = LessonGroup(lesson_id=int(lesson.id), group_id=int(group_id))
-    db.add(lesson_group)
+    try:
+        lesson_group = LessonGroup(lesson_id=int(lesson.id), group_id=int(group_id))
+        db.add(lesson_group)
 
-    await db.commit()
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail="Такой отчет уже есть")
+
 
     return lesson

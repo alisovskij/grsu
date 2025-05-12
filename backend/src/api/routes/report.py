@@ -22,6 +22,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 async def create_report(
     lesson_id: int,
     group_id: int,
+    date: str,
     db: SessionDep,
     request: Request,
     file: UploadFile = File(...)
@@ -31,7 +32,7 @@ async def create_report(
         if not user_id:
             raise HTTPException(status_code=401, detail="Требуется авторизация")
 
-        lesson = await find_lesson_in_grsu(lesson_id, user_id, group_id, db)
+        lesson = await find_lesson_in_grsu(lesson_id, user_id, group_id, date, db)
 
         save_dir = os.path.join("images", "reports")
         os.makedirs(save_dir, exist_ok=True)
@@ -53,9 +54,17 @@ async def create_report(
         await db.refresh(report)
         return {"report_id": report.id, "image_path": report.image_path}
 
+    except HTTPException as e:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail=str(e.detail))
+
+    except FileNotFoundError as e:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail=str(e))
+
     except Exception as e:
         await db.rollback()
-        raise HTTPException(status_code=404, detail=f"Такой отчет уже есть, {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка на сервере, {str(e)}")
 
 @router.get("")
 async def get_lessons_for_teacher(
