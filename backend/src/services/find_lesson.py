@@ -1,32 +1,27 @@
 from datetime import datetime
-
-import sqlalchemy
 from fastapi import HTTPException
 from sqlalchemy.future import select
-from src.models.grsu import Lesson, Faculty, Department, Group, LessonGroup
 import requests
 
+from src.models.grsu import Lesson, Faculty, Department, Group, LessonGroup
 from src.models.user import User
 from src.utils.database.session import SessionDep
 
 
-async def find_lesson_in_grsu(lesson_id: int, teacher_id: str, group_id: int, date: str, db: SessionDep):
+async def find_lesson_in_grsu(
+        lesson_id: int,
+        user: User,
+        group_id: int,
+        date: str,
+        db: SessionDep
+) -> Lesson:
     try:
         lesson_date = datetime.strptime(date, "%d.%m.%Y").date().strftime("%d.%m.%Y")
     except ValueError:
         raise HTTPException(status_code=404, detail="Неверный формат даты. Используйте ДД.MM.ГГГГ.")
 
-    teacher = (
-        await db.execute(
-            select(User).where(User.id == teacher_id)
-        )
-    ).scalar_one_or_none()
-
-    if not teacher:
-        raise HTTPException(status_code=404, detail="Преподаватель не найден")
-
     response = requests.get(
-        f'http://api.grsu.by/1.x/app2/getTeacherSchedule?teacherId={teacher.schedule_id}&dateStart={lesson_date}&dateEnd={lesson_date}'
+        f'http://api.grsu.by/1.x/app2/getTeacherSchedule?teacherId={user.schedule_id}&dateStart={lesson_date}&dateEnd={lesson_date}'
     )
 
     if response.json()['count'] == 0:
@@ -70,7 +65,7 @@ async def find_lesson_in_grsu(lesson_id: int, teacher_id: str, group_id: int, da
             address=lesson_data['address'],
             room=lesson_data['room'],
             date=datetime.strptime(response.json()['days'][0]['date'], "%Y-%m-%d").date(),
-            teacher_id = teacher.id
+            teacher_id = user.id
         )
         db.add(lesson)
         await db.commit()

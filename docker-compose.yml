@@ -10,16 +10,40 @@ services:
       POSTGRES_PASSWORD: 1111
       POSTGRES_DB: grsudb
 
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
   fastapi_app:
     build:
       context: ./backend
       dockerfile: Dockerfile
     depends_on:
       - db
+      - redis
     ports:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://grsu:1111@db:5432/grsudb
+      REDIS_URL: redis://redis:6379/0
     volumes:
       - ./backend:/app
-    command: bash -c "alembic upgrade head && uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload"
+    command: >
+      bash -c "alembic upgrade head &&
+               uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      - redis
+      - db
+    environment:
+      DATABASE_URL: postgresql+asyncpg://grsu:1111@db:5432/grsudb
+      REDIS_URL: redis://redis:6379/0
+    command: >
+      celery -A src.tasks.celery_app worker --loglevel=info --concurrency=1
+    volumes:
+      - ./backend:/app

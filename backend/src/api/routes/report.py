@@ -1,16 +1,22 @@
+import asyncio
 import os
-import shutil
 from datetime import datetime
-from sqlalchemy.orm import selectinload
-from fastapi import APIRouter, Request, File, UploadFile, HTTPException, Query
-from sqlalchemy import select
 
-from src.api.routes.auth import SESSION_KEY
-from src.models.grsu import Lesson, Group, Report, Student, Attendance
+from sqlalchemy.orm import selectinload
+from fastapi import APIRouter, File, UploadFile, HTTPException, Query, Depends
+from sqlalchemy import select
+from starlette.websockets import WebSocket
+
+from src.dependencies.user import get_current_user
+from src.models.grsu import Lesson, Group, Report
 from src.models.user import User
 from src.services.find_lesson import find_lesson_in_grsu
-from src.services.find_student import process_attendance
+from src.tasks.report_task import process_attendance
+from src.services.report_service import get_report_by_id, verify_lesson_access, get_report_for_teacher
+from src.services.student_service import get_students_by_group, get_attendance_map
 from src.utils.database.session import SessionDep
+from src.utils.file import save_upload_file
+from src.core.config import redis
 
 router = APIRouter()
 
@@ -24,25 +30,16 @@ async def create_report(
     group_id: int,
     date: str,
     db: SessionDep,
-    request: Request,
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user)
 ):
     try:
-        user_id = request.session.get(SESSION_KEY)
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Требуется авторизация")
-
-        lesson = await find_lesson_in_grsu(lesson_id, user_id, group_id, date, db)
-
-        save_dir = os.path.join("images", "reports")
-        os.makedirs(save_dir, exist_ok=True)
+        lesson = await find_lesson_in_grsu(lesson_id, user, group_id, date, db)
 
         filename = f"report_{lesson.id}_{group_id}.jpg"
-        file_path = os.path.join(save_dir, filename)
+        file_path = await save_upload_file(file, "images/reports", filename)
 
-        with open(file_path, "wb") as buffer:
-            buffer.write(await file.read())
-        await process_attendance(lesson.id, group_id, db)
+        attendance = process_attendance.delay(lesson_id, group_id)
 
         report = Report(
             lesson_id=lesson.id,
@@ -52,11 +49,11 @@ async def create_report(
         db.add(report)
         await db.commit()
         await db.refresh(report)
-        return {"report_id": report.id, "image_path": report.image_path}
+        return {"task": attendance.id, "report": report.id}
 
-    except HTTPException as e:
+    except HTTPException:
         await db.rollback()
-        raise HTTPException(status_code=404, detail=str(e.detail))
+        raise
 
     except FileNotFoundError as e:
         await db.rollback()
@@ -67,25 +64,12 @@ async def create_report(
         raise HTTPException(status_code=500, detail=f"Ошибка на сервере, {str(e)}")
 
 @router.get("")
-async def get_lessons_for_teacher(
-    request: Request,
+async def get_reports_for_teacher(
     db: SessionDep,
     dateStart: str = Query(..., description="Дата начала в формате ДД.MM.ГГГГ"),
-    dateEnd: str = Query(..., description="Дата конца в формате ДД.MM.ГГГГ")
+    dateEnd: str = Query(..., description="Дата конца в формате ДД.MM.ГГГГ"),
+    user: User = Depends(get_current_user)
 ):
-    user_id = request.session.get(SESSION_KEY)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Требуется авторизация")
-
-    teacher = (
-        await db.execute(
-            select(User).where(User.id == user_id)
-        )
-    ).scalar_one_or_none()
-
-    if not teacher:
-        raise HTTPException(status_code=404, detail="Преподаватель не найден")
-
     try:
         start_date = datetime.strptime(dateStart, "%d.%m.%Y").date()
         end_date = datetime.strptime(dateEnd, "%d.%m.%Y").date()
@@ -100,7 +84,7 @@ async def get_lessons_for_teacher(
             selectinload(Lesson.teacher)
         )
         .where(
-            Lesson.teacher_id == user_id,
+            Lesson.teacher_id == user.id,
             Lesson.date >= start_date,
             Lesson.date <= end_date
         )
@@ -114,12 +98,7 @@ async def get_lessons_for_teacher(
     for lesson in lessons:
         groups_data = []
         for group in lesson.groups:
-            report = (
-                await db.execute(
-                    select(Report)
-                    .where(Report.lesson_id == lesson.id, Report.group_id == group.id)
-                )
-            ).scalar_one_or_none()
+            report = await get_report_for_teacher(lesson.id, group.id, db)
 
             groups_data.append({
                 "id": group.id,
@@ -156,66 +135,51 @@ async def get_lessons_for_teacher(
 
 
 @router.get("/{report_id}")
-async def get_report(report_id: int, request: Request, db: SessionDep):
-    user_id = request.session.get(SESSION_KEY)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Требуется авторизация")
+async def get_report(
+        report_id: int,
+        db: SessionDep,
+        user: User = Depends(get_current_user)
+):
 
-    report = (
-        await db.execute(
-            select(Report)
-            .where(Report.id == report_id)
-        )
-    ).scalar_one_or_none()
+    report = await get_report_by_id(report_id, db)
+    lesson = await verify_lesson_access(report.lesson_id, user.id, db)
+    students = await get_students_by_group(report.group_id, db)
 
-    if not report:
-        raise HTTPException(status_code=404, detail="Отчет не найден")
-
-    lesson = (
-        await db.execute(
-            select(Lesson)
-            .where(
-                Lesson.id == report.lesson_id,
-                Lesson.teacher_id == user_id
-            )
-        )
-    ).scalar_one_or_none()
-
-    if not lesson:
-        raise HTTPException(status_code=403, detail="У вас нет доступа к этому отчету")
-
-    students = (
-        await db.execute(
-            select(Student)
-            .where(Student.group_id == report.group_id).order_by(Student.order)
-        )
-    ).scalars().all()
-
-    attendance_records = (
-        await db.execute(
-            select(Attendance)
-            .where(
-                Attendance.lesson_id == report.lesson_id,
-                Attendance.student_id.in_([s.id for s in students])
-            )
-        )
-    ).scalars().all()
-
-    attendance_map = {record.student_id: record.detected for record in attendance_records}
-
-    students_data = []
-    for student in students:
-        students_data.append({
-            "id": student.id,
-            "name": student.name,
-            "detected": attendance_map.get(student.id, False)
-        })
-
+    attendance_map = await get_attendance_map(lesson.id, [s.id for s in students], db)
 
     return {
         "report_id": report.id,
         "image_url": report.image_path,
-        "students": students_data
+        "students": [
+            {
+                "id": student.id,
+                "name": student.name,
+                "detected": attendance_map.get(student.id, False)
+            }
+            for student in students
+        ]
     }
 
 
+@router.websocket("/ws/progress/{task_id}")
+async def websocket_progress(websocket: WebSocket, task_id: str):
+    await websocket.accept()
+
+    try:
+        while True:
+            progress = await redis.get(f"task_progress:{task_id}")
+
+            if progress is None:
+                await asyncio.sleep(0.5)
+                continue
+
+            await websocket.send_json({"progress": int(progress)})
+
+            if int(progress) >= 100:
+                await redis.set(f"task_progress:{task_id}", "success")
+                break
+
+            await asyncio.sleep(0.5)
+
+    finally:
+        await websocket.close()

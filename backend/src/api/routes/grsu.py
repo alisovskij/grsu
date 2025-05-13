@@ -1,35 +1,19 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Request, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Depends
 import requests
-from sqlalchemy import select
-
-from src.models.grsu import Lesson, Group, LessonGroup
+from src.dependencies.user import get_current_user
 from src.models.user import User
-from src.utils.database.session import SessionDep
 
 
 router = APIRouter()
 
-SESSION_KEY = "user_id"
-
-
 @router.get('/schedule')
 async def get_teacher_schedule(
-        db: SessionDep,
-        request: Request,
         dateStart: str,
-        dateEnd: str
+        dateEnd: str,
+        user: User = Depends(get_current_user)
 ):
-    user_id = request.session.get(SESSION_KEY)
-    user = (
-        await db.execute(
-            select(User).where(User.id == user_id)
-        )
-    ).scalar_one_or_none()
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Требуется авторизация")
-
     try:
         schedule_date_start = datetime.strptime(dateStart, "%d.%m.%Y").date().strftime("%d.%m.%Y")
         schedule_date_end = datetime.strptime(dateEnd, "%d.%m.%Y").date().strftime("%d.%m.%Y")
@@ -45,14 +29,11 @@ async def get_teacher_schedule(
 
 @router.get('/getGroups')
 async def get_teacher_schedule(
-        request: Request,
         departmentId: int,
         facultyId: int,
-        course: int
+        course: int,
+        user: User = Depends(get_current_user)
 ):
-    user_id = request.session.get(SESSION_KEY)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Требуется авторизация")
 
     groups = requests.get(
         f'http://api.grsu.by/1.x/app2/getGroups?departmentId={departmentId}&facultyId={facultyId}&course={course}'
@@ -63,13 +44,9 @@ async def get_teacher_schedule(
 
 @router.get('/students')
 def get_student_by_id(
-        request: Request,
-        student_id: int
+        student_id: int,
+        user: User = Depends(get_current_user)
 ):
-    user_id = request.session.get(SESSION_KEY)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Требуется авторизация")
-
     student = requests.get(
         f'http://api.grsu.by/1.x/app2/getStudent?login={student_id}'
     )
