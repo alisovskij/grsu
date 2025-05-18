@@ -43,14 +43,12 @@ async def find_lesson_in_grsu(
     if not faculty:
         faculty = Faculty(id=int(faculty_data['id']), title=faculty_data['title'])
         db.add(faculty)
-        await db.commit()
 
     department = await db.execute(select(Department).filter(Department.id == int(department_data['id'])))
     department = department.scalars().first()
     if not department:
         department = Department(id=int(department_data['id']), title=department_data['title'])
         db.add(department)
-        await db.commit()
 
     lesson = await db.execute(select(Lesson).filter(Lesson.id == int(lesson_data['id'])))
     lesson = lesson.scalars().first()
@@ -68,7 +66,6 @@ async def find_lesson_in_grsu(
             teacher_id = user.id
         )
         db.add(lesson)
-        await db.commit()
 
     for group_data in group_data_list:
         group = await db.execute(select(Group).filter(Group.id == int(group_data['id'])))
@@ -82,14 +79,12 @@ async def find_lesson_in_grsu(
                 department_id=int(department_data['id']),
             )
             db.add(group)
-            await db.commit()
 
 
     try:
         lesson_group = LessonGroup(lesson_id=int(lesson.id), group_id=int(group_id))
         db.add(lesson_group)
 
-        await db.commit()
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=404, detail="Такой отчет уже есть")

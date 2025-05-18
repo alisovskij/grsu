@@ -15,5 +15,6 @@ opencv-python~=4.11.0.86
 deepface~=0.0.93
 alembic~=1.15.2
 celery~=5.5.2
+celery[asyncio]
 redis~=6.1.0
 asgiref~=3.8.1

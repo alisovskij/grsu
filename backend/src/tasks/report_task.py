@@ -2,7 +2,6 @@ import os
 import cv2
 from deepface import DeepFace
 from sqlalchemy import select
-from asgiref.sync import async_to_sync
 from src.core.config import async_session
 from src.models.grsu import Student, Attendance
 from src.tasks.celery_app import celery
@@ -10,7 +9,13 @@ from src.core.config import redis
 
 @celery.task(bind=True)
 def process_attendance(self, lesson_id: int, group_id: int):
-    async_to_sync(_process_attendance)(lesson_id=lesson_id, group_id=group_id, request_id=self.request.id)
+    from asgiref.sync import async_to_sync
+    async_to_sync(_process_attendance)(
+        lesson_id=lesson_id,
+        group_id=group_id,
+        request_id=self.request.id
+    )
+
 async def _process_attendance(
     lesson_id: int,
     group_id: int,

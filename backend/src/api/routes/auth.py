@@ -50,3 +50,15 @@ async def get_me(current_user: User = Depends(get_current_user)):
 async def logout(request: Request):
     request.session.pop(SESSION_KEY, None)
     return {"message": "Вы вышли из системы"}
+
+
+@router.get('/check_session')
+def check_session(request: Request):
+    user_id = request.session.get(SESSION_KEY)
+
+    if user_id:
+        return {"active": True}
+
+    return {"active": False}
+
+

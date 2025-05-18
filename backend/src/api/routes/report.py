@@ -39,29 +39,33 @@ async def create_report(
         filename = f"report_{lesson.id}_{group_id}.jpg"
         file_path = await save_upload_file(file, "images/reports", filename)
 
-        attendance = process_attendance.delay(lesson_id, group_id)
-
         report = Report(
             lesson_id=lesson.id,
             group_id=group_id,
             image_path=file_path
         )
+
         db.add(report)
         await db.commit()
         await db.refresh(report)
+
+        attendance = process_attendance.delay(lesson_id, group_id)
+
         return {"task": attendance.id, "report": report.id}
 
-    except HTTPException:
-        await db.rollback()
-        raise
 
     except FileNotFoundError as e:
-        await db.rollback()
         raise HTTPException(status_code=404, detail=str(e))
 
+    except HTTPException:
+        raise
+
     except Exception as e:
-        await db.rollback()
         raise HTTPException(status_code=500, detail=f"Ошибка на сервере, {str(e)}")
+
+    finally:
+        if db.is_active:
+            await db.rollback()
 
 @router.get("")
 async def get_reports_for_teacher(

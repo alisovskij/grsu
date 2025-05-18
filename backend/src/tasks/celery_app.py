@@ -10,6 +10,7 @@ celery.conf.update(
     task_serializer='json',
     result_serializer='json',
     accept_content=['json'],
+    task_cls='celery_asyncio.task:AsyncTask',
 )
 
 import src.tasks.report_task
