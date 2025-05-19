@@ -2,6 +2,7 @@ import asyncio
 import os
 from datetime import datetime
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from fastapi import APIRouter, File, UploadFile, HTTPException, Query, Depends
 from sqlalchemy import select
@@ -57,8 +58,9 @@ async def create_report(
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    except HTTPException:
-        raise
+    except IntegrityError as e:
+        if "duplicate key" in str(e.orig):
+            raise HTTPException(status_code=404, detail="Такой отчет уже есть")
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка на сервере, {str(e)}")

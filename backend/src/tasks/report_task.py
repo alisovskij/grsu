@@ -1,26 +1,27 @@
 import os
 import cv2
 from deepface import DeepFace
+from redis.asyncio import Redis
 from sqlalchemy import select
-from src.core.config import async_session
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
 from src.models.grsu import Student, Attendance
 from src.tasks.celery_app import celery
-from src.core.config import redis
 
 @celery.task(bind=True)
 def process_attendance(self, lesson_id: int, group_id: int):
-    from asgiref.sync import async_to_sync
-    async_to_sync(_process_attendance)(
-        lesson_id=lesson_id,
-        group_id=group_id,
-        request_id=self.request.id
-    )
+    import asyncio
+    asyncio.run(_process_attendance(lesson_id, group_id, self.request.id))
 
 async def _process_attendance(
     lesson_id: int,
     group_id: int,
     request_id: str
 ):
+    redis = Redis(host="redis", port=6379, db=0)
+    engine = create_async_engine("postgresql+asyncpg://grsu:1111@db/grsudb")
+    async_session = async_sessionmaker(engine, expire_on_commit=False)
+
     async with async_session() as db:
         group_img_path = os.path.join(
             os.getcwd(),

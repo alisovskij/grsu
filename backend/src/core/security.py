@@ -1,4 +1,5 @@
 import bcrypt
+
 SESSION_KEY = "user_id"
 
 def hash_password(password: str) -> str:
