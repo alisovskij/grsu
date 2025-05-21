@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from fastapi import APIRouter, File, UploadFile, HTTPException, Query, Depends
-from sqlalchemy import select
+from sqlalchemy import select, desc
 from starlette.websockets import WebSocket
 
 from src.dependencies.user import get_current_user
@@ -93,7 +93,7 @@ async def get_reports_for_teacher(
             Lesson.teacher_id == user.id,
             Lesson.date >= start_date,
             Lesson.date <= end_date
-        )
+        ).order_by(desc(Lesson.date))
     )
 
     result = await db.execute(lessons_query)
